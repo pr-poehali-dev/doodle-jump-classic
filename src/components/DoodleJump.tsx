@@ -204,130 +204,19 @@ export default function DoodleJump() {
       }
     };
 
-    const drawDoodler = (px: number, py: number, facingLeft: boolean, velY: number) => {
+    const doodlerImg = new Image();
+    doodlerImg.src = "https://cdn.poehali.dev/projects/8574b603-eae1-479d-bbfa-41efe4e91c10/bucket/3d5a305c-21f0-4b70-93de-cc60d0bfa121.png";
+
+    const drawDoodler = (px: number, py: number, facingLeft: boolean) => {
       const sy = py - gameRef.current.camY;
-      const cx = px + PLAYER_W / 2;
-      const dir = facingLeft ? -1 : 1;
-
+      const iw = 48, ih = 56;
       ctx.save();
-
-      // --- Тело: груша — узкая сверху, широкая снизу ---
-      ctx.fillStyle = "#d4c81a";
-      ctx.strokeStyle = "#8a7e00";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      // Грушевидная форма через bezier
-      ctx.moveTo(cx, sy + 2);
-      ctx.bezierCurveTo(cx + 14, sy + 2,  cx + 18, sy + 16, cx + 17, sy + 30);
-      ctx.bezierCurveTo(cx + 16, sy + 40, cx - 16, sy + 40, cx - 17, sy + 30);
-      ctx.bezierCurveTo(cx - 18, sy + 16, cx - 14, sy + 2,  cx, sy + 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // --- Три чёрные горизонтальные полосы на нижней части тела ---
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(cx, sy + 2);
-      ctx.bezierCurveTo(cx + 14, sy + 2,  cx + 18, sy + 16, cx + 17, sy + 30);
-      ctx.bezierCurveTo(cx + 16, sy + 40, cx - 16, sy + 40, cx - 17, sy + 30);
-      ctx.bezierCurveTo(cx - 18, sy + 16, cx - 14, sy + 2,  cx, sy + 2);
-      ctx.closePath();
-      ctx.clip();
-      ctx.fillStyle = "rgba(0,0,0,0.0)"; // прозрачный фон
-      // полосы
-      const stripeColors = ["#2a2a00", "#2a2a00", "#2a2a00"];
-      const stripeY = [sy + 22, sy + 28, sy + 34];
-      for (let i = 0; i < 3; i++) {
-        ctx.fillStyle = stripeColors[i];
-        ctx.fillRect(cx - 20, stripeY[i], 40, 3);
+      if (facingLeft) {
+        ctx.scale(-1, 1);
+        ctx.drawImage(doodlerImg, -(px + iw), sy - 4, iw, ih);
+      } else {
+        ctx.drawImage(doodlerImg, px, sy - 4, iw, ih);
       }
-      ctx.restore();
-
-      // --- Зелёная круглая шапка сверху ---
-      // Поля шапки (тёмно-зелёный эллипс)
-      ctx.fillStyle = "#2a8010";
-      ctx.strokeStyle = "#1a5008";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(cx, sy + 3, 16, 5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // Купол шапки
-      ctx.fillStyle = "#4cbe20";
-      ctx.strokeStyle = "#1a5008";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(cx, sy - 5, 13, 10, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // Тёмная полоса на шапке (ободок)
-      ctx.fillStyle = "#1a6008";
-      ctx.beginPath();
-      ctx.ellipse(cx, sy + 1, 13, 3.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // Блик на шапке
-      ctx.fillStyle = "rgba(255,255,255,0.25)";
-      ctx.beginPath();
-      ctx.ellipse(cx - 3, sy - 8, 5, 3, -0.4, 0, Math.PI * 2);
-      ctx.fill();
-
-      // --- Большой круглый глаз ---
-      const eyeX = cx + dir * 5;
-      const eyeY = sy + 14;
-      // белок
-      ctx.fillStyle = "#ffffff";
-      ctx.strokeStyle = "#8a7e00";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.ellipse(eyeX, eyeY, 7, 8, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // зрачок
-      ctx.fillStyle = "#111";
-      ctx.beginPath();
-      ctx.ellipse(eyeX + dir * 2.5, eyeY + 1, 3.5, 4.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // блик
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(eyeX + dir * 3.5, eyeY - 1, 1.3, 0, Math.PI * 2);
-      ctx.fill();
-
-      // --- Клюв: маленький треугольник сбоку ---
-      const bx = cx + dir * 13;
-      const by = eyeY + 4;
-      ctx.fillStyle = "#e06010";
-      ctx.strokeStyle = "#903000";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(bx, by - 3);
-      ctx.lineTo(bx + dir * 9, by + 1);
-      ctx.lineTo(bx, by + 4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      // линия клюва посередине
-      ctx.strokeStyle = "#903000";
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.moveTo(bx, by + 1);
-      ctx.lineTo(bx + dir * 8, by + 1);
-      ctx.stroke();
-
-      // --- Лапки снизу ---
-      const legY = sy + 42;
-      const spread = velY > 0 ? 13 : 8;
-      ctx.fillStyle = "#c4b800";
-      ctx.strokeStyle = "#8a7e00";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.ellipse(cx - spread, legY, 6, 4, -0.5, 0, Math.PI * 2);
-      ctx.fill(); ctx.stroke();
-      ctx.beginPath();
-      ctx.ellipse(cx + spread, legY, 6, 4, 0.5, 0, Math.PI * 2);
-      ctx.fill(); ctx.stroke();
-
       ctx.restore();
     };
 
@@ -366,7 +255,7 @@ export default function DoodleJump() {
         ctx.fillStyle = "#e05020";
         ctx.fillText("Нажми стрелку чтобы начать", W / 2, H / 2 - 10);
         ctx.restore();
-        drawDoodler(W / 2 - PLAYER_W / 2, H / 2 + 40, false, 0);
+        drawDoodler(W / 2 - PLAYER_W / 2, H / 2 + 40, false);
         g.frameId = requestAnimationFrame(loop);
         return;
       }
@@ -461,7 +350,7 @@ export default function DoodleJump() {
       }
 
       if (g.state !== "start") {
-        drawDoodler(g.px, g.py, g.facingLeft, g.vy);
+        drawDoodler(g.px, g.py, g.facingLeft);
       }
 
       // Счёт
