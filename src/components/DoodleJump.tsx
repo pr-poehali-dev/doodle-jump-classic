@@ -1,473 +1,647 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 
-const CANVAS_W = 400;
-const CANVAS_H = 600;
-const PLAYER_W = 34;
-const PLAYER_H = 34;
-const PLATFORM_W = 70;
-const PLATFORM_H = 12;
-const GRAVITY = 0.35;
-const JUMP_FORCE = -10.5;
-const MOVE_SPEED = 5;
-const PLATFORM_COUNT = 12;
+const W = 300;
+const H = 500;
+const GRAVITY = 0.3;
+const JUMP = -10;
+const PLAYER_W = 36;
+const PLAYER_H = 30;
+const PLAT_W = 58;
+const PLAT_H = 11;
+const SPEED = 4.5;
 
 interface Platform {
   x: number;
   y: number;
-  type: "normal" | "moving" | "crumble";
-  dx?: number;
-  broken?: boolean;
+  type: "green" | "blue" | "brown" | "white";
+  dx: number;
+  broken: boolean;
+  breakAnim: number;
+  spring: boolean;
+  springAnim: number;
 }
 
-interface Particle {
+interface Monster {
   x: number;
   y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  color: string;
+  w: number;
+  h: number;
+  dx: number;
+  dead: boolean;
+  deadAnim: number;
 }
 
-function generatePlatforms(startY: number): Platform[] {
-  const platforms: Platform[] = [];
-  for (let i = 0; i < PLATFORM_COUNT; i++) {
-    const y = startY - i * (CANVAS_H / PLATFORM_COUNT);
-    const type: Platform["type"] =
-      i > 5 && Math.random() < 0.25
-        ? "moving"
-        : i > 8 && Math.random() < 0.2
-        ? "crumble"
-        : "normal";
-    platforms.push({
-      x: Math.random() * (CANVAS_W - PLATFORM_W),
-      y,
-      type,
-      dx: type === "moving" ? (Math.random() > 0.5 ? 1.5 : -1.5) : 0,
-    });
-  }
-  return platforms;
+interface Bullet {
+  x: number;
+  y: number;
+}
+
+function makePlatform(x: number, y: number, score: number): Platform {
+  const r = Math.random();
+  let type: Platform["type"] = "green";
+  if (score > 2000 && r < 0.08) type = "brown";
+  else if (score > 1000 && r < 0.15) type = "white";
+  else if (score > 500 && r < 0.20) type = "blue";
+
+  return {
+    x, y, type,
+    dx: type === "blue" ? (Math.random() > 0.5 ? 1.5 : -1.5) : 0,
+    broken: false,
+    breakAnim: 0,
+    spring: type === "green" && Math.random() < 0.12,
+    springAnim: 0,
+  };
 }
 
 export default function DoodleJump() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({
-    playerX: CANVAS_W / 2 - PLAYER_W / 2,
-    playerY: CANVAS_H - 120,
-    velX: 0,
-    velY: JUMP_FORCE,
+  const gameRef = useRef({
+    px: W / 2 - PLAYER_W / 2,
+    py: H - 150,
+    vx: 0,
+    vy: JUMP,
+    facingLeft: false,
     score: 0,
-    highScore: 0,
-    cameraY: 0,
+    best: 0,
+    camY: 0,
     platforms: [] as Platform[],
-    particles: [] as Particle[],
-    keys: { left: false, right: false },
-    gameOver: false,
-    started: false,
+    monsters: [] as Monster[],
+    bullets: [] as Bullet[],
+    keys: { left: false, right: false, shoot: false },
+    shootCooldown: 0,
+    state: "start" as "start" | "play" | "dead",
+    deadTimer: 0,
     frameId: 0,
-    eyeDir: 0,
-    jumpFlash: 0,
+    particles: [] as { x: number; y: number; vx: number; vy: number; life: number; color: string }[],
   });
-  const [displayScore, setDisplayScore] = useState(0);
-  const [gameOver, setGameOver] = useState(false);
-  const [started, setStarted] = useState(false);
 
-  const initGame = useCallback(() => {
-    const s = stateRef.current;
-    s.platforms = generatePlatforms(CANVAS_H - 80);
-    s.platforms[0] = { x: CANVAS_W / 2 - PLATFORM_W / 2, y: CANVAS_H - 80, type: "normal" };
-    s.playerX = CANVAS_W / 2 - PLAYER_W / 2;
-    s.playerY = CANVAS_H - 120;
-    s.velX = 0;
-    s.velY = JUMP_FORCE;
-    s.score = 0;
-    s.cameraY = 0;
-    s.gameOver = false;
-    s.started = true;
-    s.particles = [];
-    s.jumpFlash = 0;
-    setDisplayScore(0);
-    setGameOver(false);
-    setStarted(true);
-  }, []);
-
-  const spawnParticles = (x: number, y: number, color: string) => {
-    const s = stateRef.current;
-    for (let i = 0; i < 8; i++) {
-      s.particles.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 4,
-        vy: (Math.random() - 0.5) * 4 - 2,
-        life: 1,
-        color,
-      });
+  const initPlatforms = () => {
+    const platforms: Platform[] = [];
+    // Starting platform under player
+    platforms.push(makePlatform(W / 2 - PLAT_W / 2, H - 100, 0));
+    const gap = H / 10;
+    for (let i = 1; i < 14; i++) {
+      platforms.push(makePlatform(Math.random() * (W - PLAT_W), H - 100 - i * gap, 0));
     }
+    return platforms;
   };
+
+  const reset = useCallback(() => {
+    const g = gameRef.current;
+    g.px = W / 2 - PLAYER_W / 2;
+    g.py = H - 150;
+    g.vx = 0;
+    g.vy = JUMP;
+    g.score = 0;
+    g.camY = 0;
+    g.facingLeft = false;
+    g.platforms = initPlatforms();
+    g.monsters = [];
+    g.bullets = [];
+    g.particles = [];
+    g.shootCooldown = 0;
+    g.deadTimer = 0;
+    g.state = "play";
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const s = stateRef.current;
+      const g = gameRef.current;
       const down = e.type === "keydown";
-      if (e.key === "ArrowLeft") s.keys.left = down;
-      if (e.key === "ArrowRight") s.keys.right = down;
-      if ((e.key === "ArrowUp" || e.key === " " || e.key === "Enter") && down) {
-        if (!s.started || s.gameOver) initGame();
+      if (e.key === "ArrowLeft") { g.keys.left = down; if (down) g.facingLeft = true; }
+      if (e.key === "ArrowRight") { g.keys.right = down; if (down) g.facingLeft = false; }
+      if (e.key === "ArrowUp" && down) {
+        if (g.state !== "play") reset();
+        else g.keys.shoot = true;
       }
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === " " || e.key === "ArrowUp") {
-        e.preventDefault();
-      }
+      if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key)) e.preventDefault();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "ArrowUp") gameRef.current.keys.shoot = false;
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKey);
+    window.addEventListener("keyup", onKeyUp);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKey);
+      window.removeEventListener("keyup", onKeyUp);
     };
-  }, [initGame]);
+  }, [reset]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
 
-    const drawRoundRect = (x: number, y: number, w: number, h: number, r: number) => {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.lineTo(x + w - r, y);
-      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-      ctx.lineTo(x + w, y + h - r);
-      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-      ctx.lineTo(x + r, y + h);
-      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-      ctx.lineTo(x, y + r);
-      ctx.quadraticCurveTo(x, y, x + r, y);
-      ctx.closePath();
-    };
+    // ---- Draw helpers ----
 
-    const drawPlayer = (x: number, y: number, eyeDir: number, jumping: boolean) => {
-      const cx = x + PLAYER_W / 2;
-      const cy = y + PLAYER_H / 2;
-
-      // Body glow
-      const grd = ctx.createRadialGradient(cx, cy, 2, cx, cy, 22);
-      grd.addColorStop(0, "rgba(100,255,180,0.18)");
-      grd.addColorStop(1, "rgba(100,255,180,0)");
-      ctx.fillStyle = grd;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 22, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Body
-      ctx.save();
-      ctx.shadowColor = "#4fffb0";
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = jumping ? "#5fffb8" : "#3de89a";
-      ctx.beginPath();
-      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      // Inner circle
-      ctx.fillStyle = "#0a0a0a";
-      ctx.beginPath();
-      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Eye
-      const ex = cx + eyeDir * 5;
-      ctx.fillStyle = "#4fffb0";
-      ctx.beginPath();
-      ctx.arc(ex, cy - 2, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#000";
-      ctx.beginPath();
-      ctx.arc(ex + 0.5, cy - 2, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-    };
-
-    const drawPlatform = (p: Platform, camY: number) => {
-      const screenY = p.y - camY;
-      if (screenY > CANVAS_H + 20 || screenY < -20) return;
-
-      ctx.save();
-
-      if (p.type === "normal") {
-        ctx.shadowColor = "#4fffb0";
-        ctx.shadowBlur = 8;
-        const gr = ctx.createLinearGradient(p.x, screenY, p.x, screenY + PLATFORM_H);
-        gr.addColorStop(0, "#3de89a");
-        gr.addColorStop(1, "#1a8a5a");
-        ctx.fillStyle = gr;
-      } else if (p.type === "moving") {
-        ctx.shadowColor = "#b0aaff";
-        ctx.shadowBlur = 8;
-        const gr = ctx.createLinearGradient(p.x, screenY, p.x, screenY + PLATFORM_H);
-        gr.addColorStop(0, "#a0a0ff");
-        gr.addColorStop(1, "#5050cc");
-        ctx.fillStyle = gr;
-      } else {
-        ctx.shadowColor = p.broken ? "#ff4444" : "#ffaa44";
-        ctx.shadowBlur = 8;
-        const gr = ctx.createLinearGradient(p.x, screenY, p.x, screenY + PLATFORM_H);
-        gr.addColorStop(0, p.broken ? "#ff4444" : "#ffaa44");
-        gr.addColorStop(1, p.broken ? "#990000" : "#cc6600");
-        ctx.fillStyle = gr;
+    const drawGrid = () => {
+      ctx.strokeStyle = "rgba(200,220,200,0.35)";
+      ctx.lineWidth = 1;
+      const offset = (gameRef.current.camY * 0.5) % 24;
+      for (let x = 0; x <= W; x += 24) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
       }
-
-      drawRoundRect(p.x, screenY, PLATFORM_W, PLATFORM_H, 6);
-      ctx.fill();
-
-      // Highlight
-      ctx.fillStyle = "rgba(255,255,255,0.15)";
-      drawRoundRect(p.x + 4, screenY + 2, PLATFORM_W - 8, 3, 2);
-      ctx.fill();
-
-      ctx.restore();
+      for (let y = -offset; y <= H; y += 24) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
     };
 
-    const loop = () => {
-      const s = stateRef.current;
-      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    const drawPlatform = (p: Platform) => {
+      const sy = p.y - gameRef.current.camY;
+      if (sy > H + 20 || sy < -30) return;
 
-      // Background
-      ctx.fillStyle = "#080808";
-      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-      // Stars
-      ctx.fillStyle = "rgba(255,255,255,0.5)";
-      const seed = Math.floor(s.cameraY / 100);
-      for (let i = 0; i < 40; i++) {
-        const sx = ((seed * 137 + i * 73) % CANVAS_W);
-        const sy = ((seed * 89 + i * 53) % CANVAS_H);
-        const r = (i % 3 === 0) ? 1.5 : 0.8;
-        ctx.beginPath();
-        ctx.arc(sx, sy, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (!s.started) {
-        // Start screen
+      if (p.broken) {
+        if (p.breakAnim <= 0) return;
         ctx.save();
-        const pulse = Math.sin(Date.now() / 600) * 0.15 + 0.85;
-        ctx.globalAlpha = pulse;
-        ctx.fillStyle = "#4fffb0";
-        ctx.font = "bold 18px 'Courier New', monospace";
-        ctx.textAlign = "center";
-        ctx.shadowColor = "#4fffb0";
-        ctx.shadowBlur = 20;
-        ctx.fillText("НАЖМИ ↑ ЧТОБЫ НАЧАТЬ", CANVAS_W / 2, CANVAS_H / 2);
+        ctx.globalAlpha = p.breakAnim / 20;
+        // two halves flying apart
+        const off = (20 - p.breakAnim) * 2;
+        ctx.fillStyle = "#cc4400";
+        ctx.fillRect(p.x, sy - off, PLAT_W / 2 - 2, PLAT_H);
+        ctx.fillRect(p.x + PLAT_W / 2 + 2, sy + off, PLAT_W / 2 - 2, PLAT_H);
         ctx.restore();
-
-        // Draw idle player
-        drawPlayer(CANVAS_W / 2 - PLAYER_W / 2, CANVAS_H / 2 - 80, 0, false);
-        s.frameId = requestAnimationFrame(loop);
         return;
       }
 
-      if (!s.gameOver) {
+      // Shadow
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.beginPath();
+      ctx.ellipse(p.x + PLAT_W / 2, sy + PLAT_H + 3, PLAT_W / 2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Platform body
+      let top = "#76c442", mid = "#5aad2c", bot = "#3d8a1a";
+      if (p.type === "blue") { top = "#4ac8e8"; mid = "#29a8cc"; bot = "#1a7a9a"; }
+      if (p.type === "brown") { top = "#c47830"; mid = "#a85a18"; bot = "#7a3c08"; }
+      if (p.type === "white") { top = "#f0f0f0"; mid = "#d0d0d0"; bot = "#aaaaaa"; }
+
+      const r = 5;
+      ctx.beginPath();
+      ctx.moveTo(p.x + r, sy);
+      ctx.lineTo(p.x + PLAT_W - r, sy);
+      ctx.quadraticCurveTo(p.x + PLAT_W, sy, p.x + PLAT_W, sy + r);
+      ctx.lineTo(p.x + PLAT_W, sy + PLAT_H - r);
+      ctx.quadraticCurveTo(p.x + PLAT_W, sy + PLAT_H, p.x + PLAT_W - r, sy + PLAT_H);
+      ctx.lineTo(p.x + r, sy + PLAT_H);
+      ctx.quadraticCurveTo(p.x, sy + PLAT_H, p.x, sy + PLAT_H - r);
+      ctx.lineTo(p.x, sy + r);
+      ctx.quadraticCurveTo(p.x, sy, p.x + r, sy);
+      ctx.closePath();
+      const grad = ctx.createLinearGradient(p.x, sy, p.x, sy + PLAT_H);
+      grad.addColorStop(0, top);
+      grad.addColorStop(0.5, mid);
+      grad.addColorStop(1, bot);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      // highlight
+      ctx.fillStyle = "rgba(255,255,255,0.3)";
+      ctx.fillRect(p.x + 6, sy + 2, PLAT_W - 12, 3);
+
+      // Spring
+      if (p.spring) {
+        const sx2 = p.x + PLAT_W / 2 - 5;
+        const sy2 = sy - (p.springAnim > 0 ? 2 : 10);
+        ctx.fillStyle = "#e83030";
+        ctx.fillRect(sx2, sy2, 10, 10);
+        ctx.fillStyle = "#ff8888";
+        ctx.fillRect(sx2 + 2, sy2 + 2, 6, 3);
+        // coil
+        ctx.strokeStyle = "#aaa";
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(sx2, sy2 + 10 + i * 3);
+          ctx.lineTo(sx2 + 10, sy2 + 10 + i * 3);
+          ctx.stroke();
+        }
+      }
+    };
+
+    const drawDoodler = (px: number, py: number, facingLeft: boolean, velY: number) => {
+      const sy = py - gameRef.current.camY;
+      const cx = px + PLAYER_W / 2;
+      const dir = facingLeft ? -1 : 1;
+
+      // Body (green blob)
+      ctx.save();
+      ctx.fillStyle = "#7cc826";
+      ctx.strokeStyle = "#2a6600";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, sy + 14, 14, 13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Eyes
+      const eyeX = cx + dir * 5;
+      // white
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.ellipse(eyeX, sy + 10, 6, 7, dir * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#2a6600";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // pupil
+      ctx.fillStyle = "#1a1a1a";
+      ctx.beginPath();
+      ctx.ellipse(eyeX + dir * 1.5, sy + 10, 3, 3.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // shine
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(eyeX + dir * 2.5, sy + 8, 1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nose
+      ctx.fillStyle = "#ff9944";
+      ctx.beginPath();
+      ctx.ellipse(cx + dir * 11, sy + 14, 4, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#cc6600";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Legs/feet
+      const legY = sy + 26;
+      const legSpread = velY > 0 ? 10 : 6;
+      ctx.fillStyle = "#7cc826";
+      ctx.strokeStyle = "#2a6600";
+      ctx.lineWidth = 1.5;
+      // left foot
+      ctx.beginPath();
+      ctx.ellipse(cx - legSpread, legY, 5, 4, -0.3, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // right foot
+      ctx.beginPath();
+      ctx.ellipse(cx + legSpread, legY, 5, 4, 0.3, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+
+      ctx.restore();
+    };
+
+    const drawMonster = (m: Monster) => {
+      const sy = m.y - gameRef.current.camY;
+      if (sy > H + 40 || sy < -40) return;
+      if (m.dead) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, m.deadAnim / 30);
+        ctx.fillStyle = "#999";
+        ctx.beginPath();
+        ctx.ellipse(m.x + m.w / 2, sy + m.h / 2, m.w / 2 * (1 + (30 - m.deadAnim) / 20), m.h / 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
+      ctx.save();
+      // Body
+      ctx.fillStyle = "#e03030";
+      ctx.strokeStyle = "#800000";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(m.x + m.w / 2, sy + m.h / 2 + 4, m.w / 2, m.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // Eyes (two)
+      [-8, 8].forEach(ox => {
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.ellipse(m.x + m.w / 2 + ox, sy + m.h / 2, 5, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#800000"; ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = "#111";
+        ctx.beginPath();
+        ctx.arc(m.x + m.w / 2 + ox + (m.dx > 0 ? 1 : -1), sy + m.h / 2, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      // Legs
+      ctx.strokeStyle = "#800000"; ctx.lineWidth = 2;
+      for (let i = -1; i <= 1; i += 2) {
+        for (let j = 0; j < 2; j++) {
+          ctx.beginPath();
+          ctx.moveTo(m.x + m.w / 2 + i * 10, sy + m.h - 4);
+          ctx.lineTo(m.x + m.w / 2 + i * 16, sy + m.h + 6 + j * 4);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    };
+
+    const drawBullet = (b: Bullet) => {
+      const sy = b.y - gameRef.current.camY;
+      ctx.save();
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#aaa";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(b.x, sy, 3, 6, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    };
+
+    const drawScore = (score: number, best: number) => {
+      ctx.save();
+      ctx.font = "bold 15px 'Arial Rounded MT Bold', Arial, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#555";
+      ctx.fillText(`${score}`, W - 10, 24);
+      if (best > 0) {
+        ctx.font = "11px Arial, sans-serif";
+        ctx.fillStyle = "#aaa";
+        ctx.fillText(`Рекорд: ${best}`, W - 10, 42);
+      }
+      ctx.restore();
+    };
+
+    const spawnParticle = (x: number, y: number, color: string) => {
+      for (let i = 0; i < 6; i++) {
+        gameRef.current.particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 5,
+          vy: (Math.random() - 0.5) * 5 - 2,
+          life: 1,
+          color,
+        });
+      }
+    };
+
+    const loop = () => {
+      const g = gameRef.current;
+      ctx.clearRect(0, 0, W, H);
+
+      // Background
+      ctx.fillStyle = "#f5f5e8";
+      ctx.fillRect(0, 0, W, H);
+      drawGrid();
+
+      if (g.state === "start") {
+        // Title
+        ctx.save();
+        ctx.font = "bold 28px 'Arial Rounded MT Bold', Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#4a8a20";
+        ctx.fillText("Doodle Jump", W / 2, H / 2 - 60);
+        ctx.font = "14px Arial";
+        ctx.fillStyle = "#888";
+        ctx.fillText("← → движение, ↑ стрелять", W / 2, H / 2 - 20);
+        ctx.font = "bold 16px Arial";
+        ctx.fillStyle = "#e05020";
+        const pulse = Math.abs(Math.sin(Date.now() / 500));
+        ctx.globalAlpha = 0.6 + pulse * 0.4;
+        ctx.fillText("Нажми любую стрелку", W / 2, H / 2 + 20);
+        ctx.restore();
+        drawDoodler(W / 2 - PLAYER_W / 2, H / 2 + 60, false, 0);
+        g.frameId = requestAnimationFrame(loop);
+        return;
+      }
+
+      // --- PLAY ---
+      if (g.state === "play") {
         // Input
-        if (s.keys.left) { s.velX = -MOVE_SPEED; s.eyeDir = -1; }
-        else if (s.keys.right) { s.velX = MOVE_SPEED; s.eyeDir = 1; }
-        else { s.velX *= 0.85; }
+        if (g.keys.left) { g.vx = -SPEED; g.facingLeft = true; }
+        else if (g.keys.right) { g.vx = SPEED; g.facingLeft = false; }
+        else g.vx *= 0.75;
+
+        // Shoot
+        if (g.keys.shoot && g.shootCooldown <= 0) {
+          g.bullets.push({ x: g.px + PLAYER_W / 2, y: g.py + g.camY });
+          g.shootCooldown = 25;
+          g.keys.shoot = false;
+        }
+        if (g.shootCooldown > 0) g.shootCooldown--;
 
         // Physics
-        s.velY += GRAVITY;
-        s.playerX += s.velX;
-        s.playerY += s.velY;
+        g.vy += GRAVITY;
+        g.px += g.vx;
+        g.py += g.vy;
 
         // Wrap
-        if (s.playerX > CANVAS_W) s.playerX = -PLAYER_W;
-        if (s.playerX < -PLAYER_W) s.playerX = CANVAS_W;
+        if (g.px + PLAYER_W < 0) g.px = W;
+        if (g.px > W) g.px = -PLAYER_W;
 
         // Camera
-        const threshold = CANVAS_H * 0.4;
-        const playerScreen = s.playerY - s.cameraY;
-        if (playerScreen < threshold) {
-          const delta = threshold - playerScreen;
-          s.cameraY -= delta;
-          s.score = Math.max(s.score, Math.floor(-s.cameraY / 10));
-          setDisplayScore(s.score);
+        const threshold = H * 0.4;
+        const pScreen = g.py - g.camY;
+        if (pScreen < threshold) {
+          const d = threshold - pScreen;
+          g.camY -= d;
+          g.score = Math.max(g.score, Math.floor(-g.camY / 8));
         }
 
-        // Platform collision
-        if (s.velY > 0) {
-          for (const p of s.platforms) {
+        // Platform collision (only falling down)
+        if (g.vy > 0) {
+          for (const p of g.platforms) {
             if (p.broken) continue;
-            const screenY = p.y - s.cameraY;
-            const px = s.playerX + 4;
-            const py = s.playerY + PLAYER_H;
-            const prevPy = py - s.velY;
+            const sy = p.y - g.camY;
+            const footY = g.py + PLAYER_H - g.camY;
+            const prevFoot = footY - g.vy;
             if (
-              px + PLAYER_W - 8 > p.x &&
-              px < p.x + PLATFORM_W &&
-              prevPy <= p.y - s.cameraY + 2 &&
-              py >= screenY &&
-              py <= screenY + PLATFORM_H + 8
+              g.px + 4 < p.x + PLAT_W &&
+              g.px + PLAYER_W - 4 > p.x &&
+              prevFoot <= sy + 2 &&
+              footY >= sy &&
+              footY <= sy + PLAT_H + 6
             ) {
-              if (p.type === "crumble") {
+              if (p.type === "brown") {
                 p.broken = true;
-                spawnParticles(p.x + PLATFORM_W / 2, p.y - s.cameraY, "#ffaa44");
-                setTimeout(() => { p.broken = true; }, 200);
+                p.breakAnim = 20;
+                spawnParticle(p.x + PLAT_W / 2, p.y - g.camY, "#c47830");
+              } else {
+                if (p.spring) {
+                  g.vy = JUMP * 2.2;
+                  p.springAnim = 10;
+                  spawnParticle(p.x + PLAT_W / 2, p.y - g.camY, "#e83030");
+                } else {
+                  g.vy = JUMP;
+                }
               }
-              s.velY = JUMP_FORCE;
-              s.jumpFlash = 8;
-              spawnParticles(s.playerX + PLAYER_W / 2, s.playerY + PLAYER_H, "#4fffb0");
             }
           }
         }
 
         // Moving platforms
-        for (const p of s.platforms) {
-          if (p.type === "moving" && p.dx) {
+        for (const p of g.platforms) {
+          if (p.type === "blue") {
             p.x += p.dx;
-            if (p.x < 0 || p.x > CANVAS_W - PLATFORM_W) p.dx = -p.dx;
+            if (p.x < 0 || p.x > W - PLAT_W) p.dx = -p.dx;
           }
+          if (p.breakAnim > 0) p.breakAnim--;
+          if (p.springAnim > 0) p.springAnim--;
         }
 
-        // Generate new platforms
-        const topPlatform = s.platforms.reduce((a, b) => (a.y < b.y ? a : b));
-        if (topPlatform.y - s.cameraY > -CANVAS_H) {
-          const type: Platform["type"] =
-            s.score > 300 && Math.random() < 0.3
-              ? "moving"
-              : s.score > 500 && Math.random() < 0.2
-              ? "crumble"
-              : "normal";
-          s.platforms.push({
-            x: Math.random() * (CANVAS_W - PLATFORM_W),
-            y: topPlatform.y - CANVAS_H / PLATFORM_COUNT,
-            type,
-            dx: type === "moving" ? (Math.random() > 0.5 ? 1.8 : -1.8) : 0,
+        // Generate platforms
+        const topP = g.platforms.reduce((a, b) => a.y < b.y ? a : b);
+        const gap = Math.min(60 + g.score / 200, 90);
+        if (topP.y - g.camY > -H) {
+          g.platforms.push(makePlatform(Math.random() * (W - PLAT_W), topP.y - gap, g.score));
+        }
+        g.platforms = g.platforms.filter(p => p.y - g.camY < H + 50 || p.breakAnim > 0);
+
+        // Spawn monsters
+        if (g.score > 500 && Math.random() < 0.003 + g.score / 500000) {
+          g.monsters.push({
+            x: Math.random() < 0.5 ? 0 : W - 40,
+            y: g.camY + 60,
+            w: 40, h: 32,
+            dx: (Math.random() * 1 + 0.8) * (Math.random() < 0.5 ? 1 : -1),
+            dead: false,
+            deadAnim: 30,
           });
         }
 
-        // Remove old platforms
-        s.platforms = s.platforms.filter((p) => p.y - s.cameraY < CANVAS_H + 50);
-
-        // Game over
-        if (s.playerY - s.cameraY > CANVAS_H + 40) {
-          s.gameOver = true;
-          s.highScore = Math.max(s.highScore, s.score);
-          setGameOver(true);
+        // Monsters
+        for (const m of g.monsters) {
+          if (m.dead) { m.deadAnim--; continue; }
+          m.x += m.dx;
+          if (m.x < 0 || m.x + m.w > W) m.dx = -m.dx;
+          // Player stomps monster from above
+          const msy = m.y - g.camY;
+          if (
+            g.px + 4 < m.x + m.w &&
+            g.px + PLAYER_W - 4 > m.x &&
+            g.py + PLAYER_H - g.camY > msy &&
+            g.py + PLAYER_H - g.camY < msy + m.h + 10 &&
+            g.vy > 0
+          ) {
+            m.dead = true;
+            g.vy = JUMP;
+            g.score += 100;
+            spawnParticle(m.x + m.w / 2, msy, "#e03030");
+          }
+          // Player touched monster (death)
+          if (
+            !m.dead &&
+            g.px + 6 < m.x + m.w &&
+            g.px + PLAYER_W - 6 > m.x &&
+            g.py - g.camY + 4 < msy + m.h &&
+            g.py + PLAYER_H - g.camY - 4 > msy
+          ) {
+            g.state = "dead";
+            g.best = Math.max(g.best, g.score);
+          }
         }
+        g.monsters = g.monsters.filter(m => !m.dead || m.deadAnim > 0);
+
+        // Bullets
+        for (const b of g.bullets) b.y -= 12;
+        // Bullet-monster collision
+        for (const b of g.bullets) {
+          for (const m of g.monsters) {
+            if (m.dead) continue;
+            const msy = m.y - g.camY;
+            const bsy = b.y - g.camY;
+            if (b.x > m.x && b.x < m.x + m.w && bsy > msy && bsy < msy + m.h) {
+              m.dead = true;
+              g.score += 100;
+              spawnParticle(m.x + m.w / 2, msy, "#e03030");
+            }
+          }
+        }
+        g.bullets = g.bullets.filter(b => b.y - g.camY > -50);
 
         // Particles
-        s.particles = s.particles.filter((p) => p.life > 0);
-        for (const p of s.particles) {
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vy += 0.1;
-          p.life -= 0.05;
+        for (const p of g.particles) {
+          p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= 0.04;
+        }
+        g.particles = g.particles.filter(p => p.life > 0);
+
+        // Death by falling
+        if (g.py - g.camY > H + 60) {
+          g.state = "dead";
+          g.best = Math.max(g.best, g.score);
         }
       }
 
-      // Draw platforms
-      for (const p of s.platforms) drawPlatform(p, s.cameraY);
+      if (g.state === "dead") {
+        g.deadTimer++;
+      }
 
-      // Draw particles
-      for (const p of s.particles) {
+      // --- DRAW ---
+      for (const p of g.platforms) drawPlatform(p);
+      for (const m of g.monsters) drawMonster(m);
+      for (const b of g.bullets) drawBullet(b);
+
+      // Particles
+      for (const p of g.particles) {
         ctx.save();
         ctx.globalAlpha = p.life;
         ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 6;
         ctx.beginPath();
-        ctx.arc(p.x, p.y - s.cameraY, 3, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y - g.camY, 3, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
 
-      // Jump flash
-      if (s.jumpFlash > 0) {
-        ctx.save();
-        ctx.globalAlpha = s.jumpFlash / 8 * 0.08;
-        ctx.fillStyle = "#4fffb0";
-        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-        ctx.restore();
-        s.jumpFlash--;
+      if (g.state !== "start") {
+        drawDoodler(g.px, g.py, g.facingLeft, g.vy);
       }
 
-      // Draw player
-      const jumping = s.velY < 0;
-      drawPlayer(s.playerX, s.playerY - s.cameraY, s.eyeDir, jumping);
+      drawScore(g.score, g.best);
 
-      // Score
-      ctx.save();
-      ctx.font = "bold 16px 'Courier New', monospace";
-      ctx.fillStyle = "rgba(255,255,255,0.6)";
-      ctx.textAlign = "left";
-      ctx.fillText(`${s.score}`, 16, 28);
-      if (s.highScore > 0) {
-        ctx.fillStyle = "rgba(100,255,180,0.4)";
-        ctx.fillText(`Рекорд: ${s.highScore}`, 16, 48);
-      }
-      ctx.restore();
-
-      // Game over overlay
-      if (s.gameOver) {
-        ctx.fillStyle = "rgba(0,0,0,0.7)";
-        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
+      // Dead overlay
+      if (g.state === "dead") {
+        ctx.fillStyle = "rgba(255,255,240,0.7)";
+        ctx.fillRect(0, 0, W, H);
         ctx.save();
         ctx.textAlign = "center";
-        ctx.shadowColor = "#ff4444";
-        ctx.shadowBlur = 30;
-        ctx.fillStyle = "#ff6666";
-        ctx.font = "bold 36px 'Courier New', monospace";
-        ctx.fillText("ИГРА ОКОНЧЕНА", CANVAS_W / 2, CANVAS_H / 2 - 40);
-
-        ctx.shadowColor = "#4fffb0";
-        ctx.shadowBlur = 15;
-        ctx.fillStyle = "#4fffb0";
-        ctx.font = "bold 24px 'Courier New', monospace";
-        ctx.fillText(`Счёт: ${s.score}`, CANVAS_W / 2, CANVAS_H / 2 + 10);
-
-        const pulse = Math.sin(Date.now() / 500) * 0.2 + 0.8;
-        ctx.globalAlpha = pulse;
-        ctx.fillStyle = "rgba(255,255,255,0.7)";
-        ctx.font = "14px 'Courier New', monospace";
-        ctx.fillText("Нажми ↑ для рестарта", CANVAS_W / 2, CANVAS_H / 2 + 60);
+        ctx.font = "bold 30px 'Arial Rounded MT Bold', Arial, sans-serif";
+        ctx.fillStyle = "#e03020";
+        ctx.fillText("Game Over", W / 2, H / 2 - 40);
+        ctx.font = "bold 20px Arial";
+        ctx.fillStyle = "#4a8a20";
+        ctx.fillText(`Счёт: ${g.score}`, W / 2, H / 2);
+        if (g.score === g.best && g.best > 0) {
+          ctx.font = "14px Arial";
+          ctx.fillStyle = "#e8a020";
+          ctx.fillText("Новый рекорд!", W / 2, H / 2 + 28);
+        }
+        const pulse = Math.abs(Math.sin(Date.now() / 500));
+        ctx.globalAlpha = 0.6 + pulse * 0.4;
+        ctx.font = "bold 15px Arial";
+        ctx.fillStyle = "#e03020";
+        ctx.fillText("Нажми ↑ для рестарта", W / 2, H / 2 + 62);
         ctx.restore();
       }
 
-      s.frameId = requestAnimationFrame(loop);
+      g.frameId = requestAnimationFrame(loop);
     };
 
-    const s = stateRef.current;
-    s.frameId = requestAnimationFrame(loop);
-
-    return () => cancelAnimationFrame(s.frameId);
-  }, []);
+    const g = gameRef.current;
+    g.platforms = initPlatforms();
+    g.frameId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(g.frameId);
+  }, [reset]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black">
-      <div
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: "100vh",
+      background: "#111",
+    }}>
+      <canvas
+        ref={canvasRef}
+        width={W}
+        height={H}
         style={{
-          position: "relative",
-          boxShadow: "0 0 60px rgba(79,255,176,0.15), 0 0 120px rgba(79,255,176,0.05)",
-          borderRadius: "8px",
-          border: "1px solid rgba(79,255,176,0.15)",
+          display: "block",
+          borderRadius: "12px",
+          boxShadow: "0 8px 40px rgba(0,0,0,0.7)",
+          cursor: "none",
         }}
-      >
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_W}
-          height={CANVAS_H}
-          style={{ display: "block", borderRadius: "8px" }}
-        />
+      />
+      <div style={{
+        color: "rgba(255,255,255,0.3)",
+        fontSize: "12px",
+        marginTop: "14px",
+        fontFamily: "Arial, sans-serif",
+        letterSpacing: "1px",
+      }}>
+        ← → ДВИЖЕНИЕ &nbsp;·&nbsp; ↑ СТРЕЛЯТЬ
       </div>
-      <p
-        style={{
-          color: "rgba(79,255,176,0.3)",
-          fontSize: "12px",
-          marginTop: "16px",
-          fontFamily: "'Courier New', monospace",
-          letterSpacing: "2px",
-        }}
-      >
-        ← → ДВИЖЕНИЕ
-      </p>
     </div>
   );
 }
