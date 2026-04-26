@@ -434,8 +434,8 @@ export default function DoodleJump() {
       s.frameId = requestAnimationFrame(loop);
     };
 
-    s.frameId = requestAnimationFrame(loop);
     const s = stateRef.current;
+    s.frameId = requestAnimationFrame(loop);
 
     return () => cancelAnimationFrame(s.frameId);
   }, []);
