@@ -204,42 +204,108 @@ export default function DoodleJump() {
       }
     };
 
-    // Offscreen canvas для удаления белого фона персонажа
-    const doodlerImg = new Image();
-    doodlerImg.crossOrigin = "anonymous";
-    let doodlerClean: HTMLCanvasElement | null = null;
-
-    doodlerImg.onload = () => {
-      const oc = document.createElement("canvas");
-      oc.width = doodlerImg.naturalWidth;
-      oc.height = doodlerImg.naturalHeight;
-      const oc2d = oc.getContext("2d")!;
-      oc2d.drawImage(doodlerImg, 0, 0);
-      const imageData = oc2d.getImageData(0, 0, oc.width, oc.height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i + 1], b = data[i + 2];
-        // Убираем пиксели близкие к белому/светло-серому (фон скриншота)
-        if (r > 220 && g > 220 && b > 200) {
-          data[i + 3] = 0;
-        }
-      }
-      oc2d.putImageData(imageData, 0, 0);
-      doodlerClean = oc;
-    };
-    doodlerImg.src = "https://cdn.poehali.dev/projects/8574b603-eae1-479d-bbfa-41efe4e91c10/bucket/3d5a305c-21f0-4b70-93de-cc60d0bfa121.png";
-
     const drawDoodler = (px: number, py: number, facingLeft: boolean) => {
       const sy = py - gameRef.current.camY;
-      const iw = 48, ih = 56;
-      const src = doodlerClean ?? doodlerImg;
+      const cx = px + PLAYER_W / 2;
+      const dir = facingLeft ? -1 : 1;
       ctx.save();
-      if (facingLeft) {
-        ctx.scale(-1, 1);
-        ctx.drawImage(src, -(px + iw), sy - 4, iw, ih);
-      } else {
-        ctx.drawImage(src, px, sy - 4, iw, ih);
-      }
+
+      // Тело — жёлтая груша
+      ctx.fillStyle = "#c8c01a";
+      ctx.strokeStyle = "#7a7200";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx, sy + 2);
+      ctx.bezierCurveTo(cx + 13, sy + 2,  cx + 17, sy + 14, cx + 16, sy + 28);
+      ctx.bezierCurveTo(cx + 15, sy + 38, cx - 15, sy + 38, cx - 16, sy + 28);
+      ctx.bezierCurveTo(cx - 17, sy + 14, cx - 13, sy + 2,  cx, sy + 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Три чёрные полосы на брюхе
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx, sy + 2);
+      ctx.bezierCurveTo(cx + 13, sy + 2,  cx + 17, sy + 14, cx + 16, sy + 28);
+      ctx.bezierCurveTo(cx + 15, sy + 38, cx - 15, sy + 38, cx - 16, sy + 28);
+      ctx.bezierCurveTo(cx - 17, sy + 14, cx - 13, sy + 2,  cx, sy + 2);
+      ctx.closePath();
+      ctx.clip();
+      ctx.fillStyle = "#3a3800";
+      ctx.fillRect(cx - 18, sy + 20, 36, 3);
+      ctx.fillRect(cx - 18, sy + 26, 36, 3);
+      ctx.fillRect(cx - 18, sy + 32, 36, 3);
+      ctx.restore();
+
+      // Зелёная шапка — поля
+      ctx.fillStyle = "#2a7a10";
+      ctx.strokeStyle = "#1a4a08";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(cx, sy + 4, 15, 5, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // купол
+      ctx.fillStyle = "#50cc22";
+      ctx.strokeStyle = "#1a4a08";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(cx, sy - 4, 12, 9, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // тёмный ободок
+      ctx.fillStyle = "#1a5a0a";
+      ctx.beginPath();
+      ctx.ellipse(cx, sy + 2, 12, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Большой глаз
+      const eyeX = cx + dir * 4;
+      const eyeY = sy + 14;
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#7a7200";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(eyeX, eyeY, 6.5, 7.5, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#111";
+      ctx.beginPath();
+      ctx.ellipse(eyeX + dir * 2, eyeY + 1, 3.2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(eyeX + dir * 3, eyeY - 1, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Клюв
+      const bx = cx + dir * 12;
+      const by = eyeY + 4;
+      ctx.fillStyle = "#d05810";
+      ctx.strokeStyle = "#804000";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx, by - 3);
+      ctx.lineTo(bx + dir * 8, by + 1);
+      ctx.lineTo(bx, by + 4);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "#804000";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(bx, by + 0.5);
+      ctx.lineTo(bx + dir * 7, by + 0.5);
+      ctx.stroke();
+
+      // Лапки
+      ctx.fillStyle = "#b0a810";
+      ctx.strokeStyle = "#7a7200";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(cx - 11, sy + 40, 6, 4, -0.4, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(cx + 11, sy + 40, 6, 4, 0.4, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+
       ctx.restore();
     };
 
