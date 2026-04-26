@@ -204,18 +204,41 @@ export default function DoodleJump() {
       }
     };
 
+    // Offscreen canvas для удаления белого фона персонажа
     const doodlerImg = new Image();
+    doodlerImg.crossOrigin = "anonymous";
+    let doodlerClean: HTMLCanvasElement | null = null;
+
+    doodlerImg.onload = () => {
+      const oc = document.createElement("canvas");
+      oc.width = doodlerImg.naturalWidth;
+      oc.height = doodlerImg.naturalHeight;
+      const oc2d = oc.getContext("2d")!;
+      oc2d.drawImage(doodlerImg, 0, 0);
+      const imageData = oc2d.getImageData(0, 0, oc.width, oc.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        // Убираем пиксели близкие к белому/светло-серому (фон скриншота)
+        if (r > 220 && g > 220 && b > 200) {
+          data[i + 3] = 0;
+        }
+      }
+      oc2d.putImageData(imageData, 0, 0);
+      doodlerClean = oc;
+    };
     doodlerImg.src = "https://cdn.poehali.dev/projects/8574b603-eae1-479d-bbfa-41efe4e91c10/bucket/3d5a305c-21f0-4b70-93de-cc60d0bfa121.png";
 
     const drawDoodler = (px: number, py: number, facingLeft: boolean) => {
       const sy = py - gameRef.current.camY;
       const iw = 48, ih = 56;
+      const src = doodlerClean ?? doodlerImg;
       ctx.save();
       if (facingLeft) {
         ctx.scale(-1, 1);
-        ctx.drawImage(doodlerImg, -(px + iw), sy - 4, iw, ih);
+        ctx.drawImage(src, -(px + iw), sy - 4, iw, ih);
       } else {
-        ctx.drawImage(doodlerImg, px, sy - 4, iw, ih);
+        ctx.drawImage(src, px, sy - 4, iw, ih);
       }
       ctx.restore();
     };
